@@ -23,6 +23,13 @@
                                widget="bokeh_chart" nolabel="1"/>
                     </div>
                 </page>
+                <page name="projected_execution_history"
+                      string="Projected Execution Chart">
+                    <div style="margin: 3em">
+                        <field name="projected_execution_history_chart"
+                               widget="bokeh_chart" nolabel="1"/>
+                    </div>
+                </page>
             </notebook>
         </field>
     </record>
