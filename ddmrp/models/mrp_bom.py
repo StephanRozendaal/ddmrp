@@ -15,7 +15,7 @@ class MrpBom(models.Model):
     )
     orderpoint_id = fields.Many2one(
         comodel_name='stock.warehouse.orderpoint', string='Orderpoint',
-        compute="_compute_is_buffered",
+        compute="_compute_orderpoint",
     )
     dlt = fields.Float(
         string="Decoupled Lead Time (days)",
@@ -28,22 +28,30 @@ class MrpBom(models.Model):
     )
 
     def _get_search_buffer_domain(self):
-        product = self.product_id or \
-            self.product_tmpl_id.product_variant_ids[0]
+        product = self.product_id
+        if not product:
+            if self.product_tmpl_id.product_variant_ids:
+                product = self.product_tmpl_id.product_variant_ids[0]
         domain = [('product_id', '=', product.id),
                   ('buffer_profile_id', '!=', False)]
         if self.location_id:
             domain.append(('location_id', '=', self.location_id.id))
         return domain
 
-    def _compute_is_buffered(self):
-        for bom in self:
-            domain = bom._get_search_buffer_domain()
+    @api.depends('product_id', 'product_tmpl_id', 'location_id')
+    def _compute_orderpoint(self):
+        for record in self:
+            domain = record._get_search_buffer_domain()
             orderpoint = self.env['stock.warehouse.orderpoint'].search(
                 domain, limit=1)
-            bom.orderpoint_id = orderpoint
-            bom.is_buffered = True if orderpoint else False
+            record.orderpoint_id = orderpoint
 
+    @api.depends('orderpoint_id')
+    def _compute_is_buffered(self):
+        for bom in self:
+            bom.is_buffered = True if bom.orderpoint_id else False
+
+    @api.depends('location_id', 'product_id.product_tmpl_id.mrp_mts_mto_location_ids')
     def _compute_mto_rule(self):
         for rec in self:
             template = rec.product_id.product_tmpl_id or rec.product_tmpl_id
@@ -141,6 +149,7 @@ class MrpBomLine(models.Model):
             line.orderpoint_id = orderpoint
             line.is_buffered = True if orderpoint else False
 
+    @api.depends('product_id')
     def _compute_dlt(self):
         for rec in self:
             if rec.product_id.bom_ids:
@@ -149,6 +158,7 @@ class MrpBomLine(models.Model):
                 rec.dlt = rec.product_id.seller_ids and \
                     rec.product_id.seller_ids[0].delay or 0.0
 
+    @api.depends('location_id')
     def _compute_mto_rule(self):
         for rec in self:
             rec.has_mto_rule = True if (

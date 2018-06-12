@@ -837,3 +837,109 @@ class TestDdmrp(common.SavepointCase):
         # We expect that the procurement recommendation is now 0
         expected_value = 0.0
         self.assertEqual(orderpointA.procure_recommended_qty, expected_value)
+
+    def test_bom_orderpoint(self):
+        # Check if is_buffered and orderpoint_id are not set
+        self.assertEqual(self.bomA.is_buffered, False)
+        self.assertEqual(len(self.bomA.orderpoint_id), 0)
+        product = self.productA
+        orderpointA = self.orderpointModel.create({
+            'buffer_profile_id': self.buffer_profile_pur.id,
+            'product_id': product.id,
+            'warehouse_id': self.warehouse.id,
+            'product_min_qty': 0.0,
+            'product_max_qty': 0.0,
+        })
+        # Create a new bom to trigger the compute functions
+        bomB = self.bomModel.create({
+            'product_id': product.id,
+            'product_tmpl_id': product.product_tmpl_id.id,
+        })
+        # Check if is_buffered and orderpoint_id are set
+        self.assertEqual(bomB.is_buffered, True)
+        self.assertEqual(bomB.orderpoint_id, orderpointA)
+        # Create another orderpoint with a location, then change the bom
+        # location
+        orderpointB = self.orderpointModel.create({
+            'buffer_profile_id': self.buffer_profile_pur.id,
+            'product_id': product.id,
+            'warehouse_id': self.warehouse.id,
+            'location_id': self.supplier_location.id,
+            'product_min_qty': 0.0,
+            'product_max_qty': 0.0,
+        })
+        bomB.location_id = self.supplier_location.id
+        self.assertEqual(bomB.is_buffered, True)
+        self.assertEqual(bomB.orderpoint_id, orderpointB)
+        bomC = self.env['mrp.bom'].create({
+            'product_tmpl_id': product.product_tmpl_id.id
+        })
+        '''
+        Note:
+        If you have two mrp.bom, one with a location_id and one without
+        If you then search for the orderpoint, which should it pick?
+        it the bom has no location set, do you care what orderpoint it picks?
+        it could pick a orderpoint with a location set.
+        '''
+        self.assertEqual(bomC.is_buffered, True)
+        self.assertEqual(bomC.orderpoint_id, orderpointA)
+
+    def test_bom_mto_rule(self):
+        self.assertEqual(self.bomA.has_mto_rule, False)
+        orderpointA = self.orderpointModel.create({
+            'buffer_profile_id': self.buffer_profile_pur.id,
+            'product_id': self.productA.id,
+            'warehouse_id': self.warehouse.id,
+            'product_min_qty': 0.0,
+            'product_max_qty': 0.0,
+        })
+        self.bomA.location_id = self.supplier_location
+        self.bomA.product_id.product_tmpl_id.mrp_mts_mto_location_ids += (
+            self.supplier_location
+        )
+        self.assertEqual(self.bomA.has_mto_rule, True)
+
+    def test_bom_line(self):
+        productB = self.env['product.product'].create({
+            'name': 'product B',
+            'standard_price': 1,
+            'type': 'product',
+            'uom_id': self.uom_unit.id,
+            'default_code': 'B',
+            'route_ids': [(6, 0, self.env.ref('mrp.route_warehouse0_manufacture').ids)]
+        })
+        bom_line_A = self.env['mrp.bom.line'].create({
+            'product_id': productB.id,
+            'product_qty': 1.0,
+            'bom_id': self.bomA.id,
+        })
+        self.assertEqual(bom_line_A.dlt, 0.0)
+        partnerA = self.env['res.partner'].create({
+            'name': 'partner A',
+        })
+        supplierA = self.env['product.supplierinfo'].create({
+            'name': partnerA.id,
+            'product_id': productB.id,
+            'delay': 10.0,
+        })
+        productB.seller_ids += supplierA
+        bom_line_B = self.env['mrp.bom.line'].create({
+            'product_id': productB.id,
+            'product_qty': 1.0,
+            'bom_id': self.bomA.id,
+        })
+        self.assertEqual(bom_line_B.dlt, 10.0)
+        '''
+        DLT can be computed from bom_line.product_id.bom_ids[0]
+        What do you want to happen when there are multiple bom_ids?
+        It will only take the first one now.
+        '''
+        self.bomA.dlt = 5.0
+        self.bomA.product_tmpl_id = self.productA.product_tmpl_id
+        productB.bom_ids += self.bomA
+        bom_line_C = self.env['mrp.bom.line'].create({
+            'product_id': productB.id,
+            'product_qty': 1.0,
+            'bom_id': self.bomA.id,
+        })
+        self.assertEqual(bom_line_C.dlt, 5.0)
